@@ -14,7 +14,6 @@ from solver.algorithms.dfs_solver import DFSSolver
 from solver.algorithms.hybrid_solver import HybridSolver
 from solver.analysis.visualizer import ComplexityVisualizer
 
-# Configure logging for production
 logging.basicConfig(
     level=logging.INFO if os.environ.get('RENDER') else logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -23,10 +22,8 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configure CORS for production
 if os.environ.get('RENDER'):
-    # Production - allow your Netlify domain and local development
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://your-frontend.netlify.app')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://puzzlylogic.app')
     CORS(app, origins=[
         frontend_url,
         "http://localhost:5173",
@@ -34,11 +31,9 @@ if os.environ.get('RENDER'):
     ])
     logger.info(f"CORS configured for production. Allowed origins: {frontend_url}, localhost")
 else:
-    # Development - allow all origins
     CORS(app)
     logger.info("CORS configured for development (allowing all origins)")
 
-# Initialize dictionary helper
 try:
     dict_helper = DictionaryHelper("dictionary")
     logger.info("Dictionary helper initialized successfully")
@@ -46,7 +41,6 @@ except Exception as e:
     logger.error(f"Failed to initialize dictionary helper: {str(e)}")
     raise
 
-# Global storage for complexity trackers
 complexity_trackers = {}
 
 def _build_cors_preflight_response():
@@ -59,7 +53,6 @@ def _build_cors_preflight_response():
 
 def _corsify_actual_response(response, status_code=None):
     """Add CORS headers to actual responses"""
-    # Headers are handled by Flask-CORS, but we keep this for any additional headers
     if status_code:
         response.status_code = status_code
     return response
@@ -127,7 +120,6 @@ def solve():
 
         start_time = time.time()
 
-        # Initialize appropriate solver
         if algorithm == "DFS":
             solver = DFSSolver(grid, clues, dict_helper, enable_memory_profiling)
         elif algorithm == "A*":
@@ -137,14 +129,11 @@ def solve():
         else:
             return jsonify({"error": "Invalid algorithm"}), 400
 
-        # Store complexity tracker for visualization
         complexity_trackers[algorithm] = solver.complexity_tracker
         
-        # Execute solving
         result = solver.solve()
         execution_time = time.time() - start_time
 
-        # Enhanced memory metrics
         memory_metrics = {
             "memory_usage_kb": result.get("memory_usage_kb", 0),
             "min_memory_kb": result.get("min_memory_kb", 0),
@@ -261,8 +250,6 @@ def visualize_complexity():
         if not trackers:
             return jsonify({"error": "No complexity data available. Run solvers first."}), 400
             
-        # Note: In production, you might want to save images to a temporary directory
-        # and return URLs instead of generating charts on-the-fly
         if chart_type == "time":
             ComplexityVisualizer.plot_time_complexity(trackers, title)
         elif chart_type == "space":
@@ -318,7 +305,6 @@ def generate():
 
         logger.info(f"Generation request - Size: {size}, Difficulty: {difficulty}")
 
-        # Validate inputs
         if size < 7 or size > 21:
             return jsonify({
                 "success": False,
@@ -338,7 +324,6 @@ def generate():
         }
         min_density, max_density = DENSITY_BOUNDS[difficulty]
 
-        # Configure parameters based on difficulty
         if difficulty == 'easy':
             min_word_length = max(3, size//3)
             max_word_length = min(12, size)
@@ -358,7 +343,6 @@ def generate():
         base_word_count = size * 1.5
         target_word_count = int(base_word_count * word_count_multiplier)
 
-        # Get initial word
         initial_length = random.randint(min_word_length, min(max_word_length, size//2))
         possible_words = dict_helper.get_words_by_length(length=initial_length, max_words=100)
         if not possible_words:
@@ -373,7 +357,6 @@ def generate():
         best_puzzle = None
         best_density = 0.0
 
-        # Attempt puzzle generation
         for attempt in range(MAX_GENERATION_TRIES):
             logger.info(f"Generation attempt {attempt + 1}/{MAX_GENERATION_TRIES} [diff={difficulty}]")
 
@@ -425,7 +408,6 @@ def generate():
             logger.warning(f"Used fallback puzzle with density={final_density:.2%} "
                           f"(target: {min_density:.2%}-{max_density:.2%})")
 
-        # Prepare response data
         empty_grid = final_puzzle.empty_grid
         
         across, down = final_puzzle.analyze_grid(for_empty_grid=True)
@@ -513,10 +495,8 @@ def internal_error(error):
     }), 500)
 
 if __name__ == "__main__":
-    # Get port from environment variable (Render sets this) or default to 5000
     port = int(os.environ.get('PORT', 5000))
     
-    # Only run in debug mode if not in production
     debug = not os.environ.get('RENDER')
     
     logger.info(f"Starting server on port {port} (debug: {debug})")
