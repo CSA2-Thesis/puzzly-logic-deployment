@@ -1,6 +1,8 @@
 import logging
 import random
 import time
+import traceback
+import os
 from flask import Flask, make_response, request, jsonify
 from flask_cors import CORS
 from dictionary_helper import DictionaryHelper
@@ -12,12 +14,96 @@ from solver.algorithms.dfs_solver import DFSSolver
 from solver.algorithms.hybrid_solver import HybridSolver
 from solver.analysis.visualizer import ComplexityVisualizer
 
+# Configure logging for production
+logging.basicConfig(
+    level=logging.INFO if os.environ.get('RENDER') else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
-CORS(app) 
 
-dict_helper = DictionaryHelper("dictionary")
+# Configure CORS for production
+if os.environ.get('RENDER'):
+    # Production - allow your Netlify domain and local development
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://your-frontend.netlify.app')
+    CORS(app, origins=[
+        frontend_url,
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ])
+    logger.info(f"CORS configured for production. Allowed origins: {frontend_url}, localhost")
+else:
+    # Development - allow all origins
+    CORS(app)
+    logger.info("CORS configured for development (allowing all origins)")
 
+# Initialize dictionary helper
+try:
+    dict_helper = DictionaryHelper("dictionary")
+    logger.info("Dictionary helper initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize dictionary helper: {str(e)}")
+    raise
+
+# Global storage for complexity trackers
 complexity_trackers = {}
+
+def _build_cors_preflight_response():
+    """Build CORS preflight response"""
+    response = jsonify({"message": "Preflight Request Accepted"})
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+    response.headers.add("Access-Control-Max-Age", "86400")  # 24 hours
+    return response
+
+def _corsify_actual_response(response, status_code=None):
+    """Add CORS headers to actual responses"""
+    # Headers are handled by Flask-CORS, but we keep this for any additional headers
+    if status_code:
+        response.status_code = status_code
+    return response
+
+@app.before_request
+def log_request_info():
+    """Log request details for debugging"""
+    if os.environ.get('RENDER'):
+        logger.debug(f"Request: {request.method} {request.path}")
+    else:
+        logger.info(f"Request: {request.method} {request.path} - Headers: {dict(request.headers)}")
+
+@app.after_request
+def log_response_info(response):
+    """Log response details for debugging"""
+    if not os.environ.get('RENDER'):
+        logger.info(f"Response: {response.status_code} - Size: {response.content_length} bytes")
+    return response
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for Render"""
+    return jsonify({
+        "status": "healthy",
+        "service": "crossword-backend",
+        "timestamp": time.time(),
+        "environment": "production" if os.environ.get('RENDER') else "development"
+    })
+
+@app.route("/", methods=["GET"])
+def home():
+    """Root endpoint"""
+    return jsonify({
+        "message": "Crossword Puzzle Generator & Solver API",
+        "version": "1.0.0",
+        "endpoints": [
+            "/health - Health check",
+            "/generate - Generate crossword puzzle",
+            "/solve - Solve crossword puzzle",
+            "/analyze - Compare algorithms",
+            "/suggest - Get word suggestions",
+            "/download - Download puzzle"
+        ]
+    })
 
 @app.route("/solve", methods=["POST", "OPTIONS"])
 def solve():
@@ -34,11 +120,14 @@ def solve():
         algorithm = data.get("algorithm", "HYBRID").upper()
         enable_memory_profiling = data.get("enable_memory_profiling", False)
 
+        logger.info(f"Solve request - Algorithm: {algorithm}, Grid size: {len(grid)}x{len(grid[0]) if grid else 0}")
+
         if not grid or not clues:
             return jsonify({"error": "Missing grid or clues"}), 400
 
         start_time = time.time()
 
+        # Initialize appropriate solver
         if algorithm == "DFS":
             solver = DFSSolver(grid, clues, dict_helper, enable_memory_profiling)
         elif algorithm == "A*":
@@ -48,8 +137,10 @@ def solve():
         else:
             return jsonify({"error": "Invalid algorithm"}), 400
 
+        # Store complexity tracker for visualization
         complexity_trackers[algorithm] = solver.complexity_tracker
         
+        # Execute solving
         result = solver.solve()
         execution_time = time.time() - start_time
 
@@ -79,14 +170,15 @@ def solve():
             }
         }
 
+        logger.info(f"Solve completed - Algorithm: {algorithm}, Success: {response_data['success']}, Time: {execution_time:.4f}s")
         return _corsify_actual_response(jsonify(response_data))
 
     except Exception as e:
-        logging.error(f"Solve error: {str(e)}", exc_info=True)
-        return jsonify({
+        logger.error(f"Solve error: {str(e)}", exc_info=True)
+        return _corsify_actual_response(jsonify({
             "error": "Internal server error",
             "details": str(e)
-        }), 500
+        }), 500)
 
 @app.route("/analyze", methods=["POST", "OPTIONS"])
 def analyze_complexity():
@@ -105,6 +197,8 @@ def analyze_complexity():
         if not grid or not clues:
             return jsonify({"error": "Missing grid or clues"}), 400
 
+        logger.info(f"Analysis request - Grid size: {len(grid)}x{len(grid[0])}")
+
         algorithms = {
             "DFS": DFSSolver(grid, clues, dict_helper),
             "A*": AStarSolver(grid, clues, dict_helper),
@@ -113,6 +207,7 @@ def analyze_complexity():
         
         results = {}
         for algo_name, solver in algorithms.items():
+            logger.info(f"Running {algo_name} solver...")
             start_time = time.time()
             result = solver.solve()
             execution_time = time.time() - start_time
@@ -133,15 +228,16 @@ def analyze_complexity():
                     "status": result.get("status", "unknown")
                 }
             }
+            logger.info(f"{algo_name} completed - Success: {results[algo_name]['success']}, Time: {execution_time:.4f}s")
 
         return _corsify_actual_response(jsonify(results))
 
     except Exception as e:
-        logging.error(f"Analysis error: {str(e)}", exc_info=True)
-        return jsonify({
+        logger.error(f"Analysis error: {str(e)}", exc_info=True)
+        return _corsify_actual_response(jsonify({
             "error": "Internal server error",
             "details": str(e)
-        }), 500
+        }), 500)
 
 @app.route("/visualize", methods=["GET", "OPTIONS"])
 def visualize_complexity():
@@ -153,6 +249,8 @@ def visualize_complexity():
         algorithm = request.args.get("algorithm", "").upper()
         chart_type = request.args.get("type", "combined")
         
+        logger.info(f"Visualization request - Algorithm: {algorithm}, Type: {chart_type}")
+
         if algorithm and algorithm in complexity_trackers:
             trackers = {algorithm: complexity_trackers[algorithm]}
             title = f"{algorithm} Algorithm Complexity"
@@ -163,6 +261,8 @@ def visualize_complexity():
         if not trackers:
             return jsonify({"error": "No complexity data available. Run solvers first."}), 400
             
+        # Note: In production, you might want to save images to a temporary directory
+        # and return URLs instead of generating charts on-the-fly
         if chart_type == "time":
             ComplexityVisualizer.plot_time_complexity(trackers, title)
         elif chart_type == "space":
@@ -170,27 +270,41 @@ def visualize_complexity():
         else:
             ComplexityVisualizer.plot_combined_complexity(trackers, title)
             
-        return jsonify({
+        logger.info(f"Visualization generated for {len(trackers)} algorithm(s)")
+        return _corsify_actual_response(jsonify({
             "success": True,
             "message": f"Complexity visualization generated for {len(trackers)} algorithm(s)"
-        })
+        }))
         
     except Exception as e:
-        logging.error(f"Visualization error: {str(e)}", exc_info=True)
-        return jsonify({
+        logger.error(f"Visualization error: {str(e)}", exc_info=True)
+        return _corsify_actual_response(jsonify({
             "error": "Failed to generate visualization",
             "details": str(e)
-        }), 500
+        }), 500)
 
 @app.route("/suggest", methods=["GET", "OPTIONS"])
 def suggest_words():
     if request.method == "OPTIONS":
         return _build_cors_preflight_response()
         
-    clue = request.args.get("clue", "")
-    max_words = int(request.args.get("max", 20))
-    words = dict_helper.get_possible_words(clue=clue, max_words=max_words)
-    return _corsify_actual_response(jsonify(words))
+    try:
+        clue = request.args.get("clue", "")
+        max_words = int(request.args.get("max", 20))
+        
+        logger.info(f"Word suggestion request - Clue: {clue}, Max words: {max_words}")
+        
+        words = dict_helper.get_possible_words(clue=clue, max_words=max_words)
+        
+        logger.info(f"Returning {len(words)} word suggestions")
+        return _corsify_actual_response(jsonify(words))
+        
+    except Exception as e:
+        logger.error(f"Suggestion error: {str(e)}", exc_info=True)
+        return _corsify_actual_response(jsonify({
+            "error": "Failed to get word suggestions",
+            "details": str(e)
+        }), 500)
 
 @app.route('/generate', methods=['POST', 'OPTIONS'])
 def generate():
@@ -202,6 +316,21 @@ def generate():
         size = int(data.get('size', 15))
         difficulty = data.get('difficulty', 'medium')
 
+        logger.info(f"Generation request - Size: {size}, Difficulty: {difficulty}")
+
+        # Validate inputs
+        if size < 7 or size > 21:
+            return jsonify({
+                "success": False,
+                "error": "Size must be between 7 and 21"
+            }), 400
+
+        if difficulty not in ['easy', 'medium', 'hard']:
+            return jsonify({
+                "success": False,
+                "error": "Difficulty must be easy, medium, or hard"
+            }), 400
+
         DENSITY_BOUNDS = {
             'easy': (0.35, 0.50),
             'medium': (0.60, 0.69),
@@ -209,6 +338,7 @@ def generate():
         }
         min_density, max_density = DENSITY_BOUNDS[difficulty]
 
+        # Configure parameters based on difficulty
         if difficulty == 'easy':
             min_word_length = max(3, size//3)
             max_word_length = min(12, size)
@@ -228,6 +358,7 @@ def generate():
         base_word_count = size * 1.5
         target_word_count = int(base_word_count * word_count_multiplier)
 
+        # Get initial word
         initial_length = random.randint(min_word_length, min(max_word_length, size//2))
         possible_words = dict_helper.get_words_by_length(length=initial_length, max_words=100)
         if not possible_words:
@@ -242,8 +373,9 @@ def generate():
         best_puzzle = None
         best_density = 0.0
 
+        # Attempt puzzle generation
         for attempt in range(MAX_GENERATION_TRIES):
-            logging.info(f"Attempt {attempt + 1}/{MAX_GENERATION_TRIES} [diff={difficulty}]")
+            logger.info(f"Generation attempt {attempt + 1}/{MAX_GENERATION_TRIES} [diff={difficulty}]")
 
             word_list = []
             dynamic_max_len = max_word_length + (attempt % 2)
@@ -290,35 +422,39 @@ def generate():
         used_fallback = generated_puzzle is None
 
         if used_fallback:
-            logging.warning(f"Used fallback puzzle with density={final_density:.2%} "
+            logger.warning(f"Used fallback puzzle with density={final_density:.2%} "
                           f"(target: {min_density:.2%}-{max_density:.2%})")
 
-        if final_puzzle:
-            empty_grid = final_puzzle.empty_grid
-            
-            across, down = final_puzzle.analyze_grid(for_empty_grid=True)
-            numbered_positions = {(slot.x, slot.y): slot.number for slot in across + down}
-            
-            for y in range(final_puzzle.height):
-                for x in range(final_puzzle.width):
-                    if (x, y) in numbered_positions:
-                        empty_grid[y][x] = str(numbered_positions[(x, y)])
-            
-            return _corsify_actual_response(jsonify({
-                "success": True,
-                "grid": final_puzzle.grid,
-                "empty_grid": empty_grid,   
-                "clues": final_puzzle.get_clues(),
-                "stats": {
-                    "word_count": len(final_puzzle.words),
-                    "difficulty": difficulty,
-                    "size": size,
-                    "density": final_puzzle.calculate_density()
-                }
-            }))
+        # Prepare response data
+        empty_grid = final_puzzle.empty_grid
+        
+        across, down = final_puzzle.analyze_grid(for_empty_grid=True)
+        numbered_positions = {(slot.x, slot.y): slot.number for slot in across + down}
+        
+        for y in range(final_puzzle.height):
+            for x in range(final_puzzle.width):
+                if (x, y) in numbered_positions:
+                    empty_grid[y][x] = str(numbered_positions[(x, y)])
+        
+        response_data = {
+            "success": True,
+            "grid": final_puzzle.grid,
+            "empty_grid": empty_grid,   
+            "clues": final_puzzle.get_clues(),
+            "stats": {
+                "word_count": len(final_puzzle.words),
+                "difficulty": difficulty,
+                "size": size,
+                "density": final_puzzle.calculate_density(),
+                "used_fallback": used_fallback
+            }
+        }
+
+        logger.info(f"Generation successful - Word count: {len(final_puzzle.words)}, Density: {final_density:.2%}")
+        return _corsify_actual_response(jsonify(response_data))
 
     except Exception as e:
-        logging.error(f"Generation error: {str(e)}", exc_info=True)
+        logger.error(f"Generation error: {str(e)}", exc_info=True)
         return _corsify_actual_response(jsonify({
             "success": False,
             "error": "Internal server error",
@@ -336,6 +472,11 @@ def download():
         format = data.get('format', 'png').lower()
         show_answers = data.get('showAnswers', False)
         
+        logger.info(f"Download request - Format: {format}, Show answers: {show_answers}")
+
+        if not puzzle:
+            return _corsify_actual_response(jsonify({'error': 'No puzzle data provided'}), 400)
+        
         if format == 'png':
             image_data = generate_png_image(puzzle, show_answers)
             response = make_response(image_data)
@@ -350,23 +491,33 @@ def download():
             response.headers['Content-Disposition'] = 'attachment; filename=crossword.pdf'
             return _corsify_actual_response(response)
             
-        return _corsify_actual_response(jsonify({'error': 'Invalid format'}), 400)
+        return _corsify_actual_response(jsonify({'error': 'Invalid format. Use "png" or "pdf".'}), 400)
         
     except Exception as e:
+        logger.error(f"Download error: {str(e)}", exc_info=True)
         return _corsify_actual_response(jsonify({'error': str(e)}), 500)
 
-def _build_cors_preflight_response():
-    response = jsonify({"message": "Preflight Request Accepted"})
-    response.headers.add("Access-Control-Allow-Origin", "http://localhost:5173")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-    response.headers.add("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-    return response
+@app.errorhandler(404)
+def not_found(error):
+    return _corsify_actual_response(jsonify({
+        "error": "Endpoint not found",
+        "message": "The requested endpoint does not exist."
+    }), 404)
 
-def _corsify_actual_response(response, status_code=None):
-    response.headers.add("Access-Control-Allow-Origin", "http://localhost:5173")
-    if status_code:
-        response.status_code = status_code
-    return response
+@app.errorhandler(500)
+def internal_error(error):
+    logger.error(f"Internal server error: {str(error)}")
+    return _corsify_actual_response(jsonify({
+        "error": "Internal server error",
+        "message": "An unexpected error occurred."
+    }), 500)
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # Get port from environment variable (Render sets this) or default to 5000
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Only run in debug mode if not in production
+    debug = not os.environ.get('RENDER')
+    
+    logger.info(f"Starting server on port {port} (debug: {debug})")
+    app.run(host='0.0.0.0', port=port, debug=debug)

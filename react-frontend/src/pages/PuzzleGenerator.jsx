@@ -8,6 +8,7 @@ import React, { useState, useEffect } from "react";
 import AlgorithmSelector from "../components/AlgorithmSelector";
 import { FiCheckCircle, FiDownload, FiCpu, FiHelpCircle } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
+import { config } from "../config";
 
 export default function PuzzleGenerator() {
   const [gridSize, setGridSize] = useState(21);
@@ -78,8 +79,9 @@ export default function PuzzleGenerator() {
     setIsLoading(true);
     setSolvedPuzzle(null);
     try {
+      
       const response = await axios.post(
-        "http://localhost:5000/generate",
+        `${config.API_BASE_URL}/generate`,
         {
           size: gridSize,
           difficulty,
