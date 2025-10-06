@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 if os.environ.get('RENDER'):
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://puzzlylogic.app')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://puzzlylogic.netlify.app')
     CORS(app, origins=[
         frontend_url,
         "http://localhost:5173",
