@@ -7,7 +7,7 @@ import Modal from "../components/Modal";
 import React, { useState, useEffect } from "react";
 import AlgorithmSelector from "../components/AlgorithmSelector";
 import { FiCheckCircle, FiDownload, FiCpu, FiHelpCircle } from "react-icons/fi";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function PuzzleGenerator() {
   const [gridSize, setGridSize] = useState(21);
@@ -26,6 +26,9 @@ export default function PuzzleGenerator() {
   const [tooltipHover, setTooltipHover] = useState(false);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
   const algorithms = [
     {
@@ -93,7 +96,7 @@ export default function PuzzleGenerator() {
     setSolvedPuzzle(null);
     try {
       const response = await axios.post(
-        "http://localhost:5000/generate",
+        `${API_BASE}/generate`,
         {
           size: gridSize,
           difficulty,
@@ -132,7 +135,7 @@ export default function PuzzleGenerator() {
         })
       );
 
-      const response = await axios.post("http://localhost:5000/solve", {
+      const response = await axios.post(`${API_BASE}/solve`, {
         grid: gridToSolve,
         clues: generatedPuzzle.clues,
         algorithm: selectedAlgorithm,
@@ -166,7 +169,7 @@ export default function PuzzleGenerator() {
     setIsDownloading(true);
     try {
       const response = await axios.post(
-        "http://localhost:5000/download",
+        `${API_BASE}/download`,
         {
           puzzle: generatedPuzzle,
           format,

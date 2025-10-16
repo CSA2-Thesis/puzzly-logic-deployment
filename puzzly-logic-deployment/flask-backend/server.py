@@ -15,11 +15,9 @@ from solver.analysis.visualizer import ComplexityVisualizer
 
 app = Flask(__name__)
 
-# Configure CORS for production - replace with your actual Netlify domain
 frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 CORS(app, origins=[frontend_url, "https://puzzlylogic.netlify.app"])
 
-# Configure logging for production
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
@@ -96,7 +94,6 @@ def solve():
         result = solver.solve()
         execution_time = time.time() - start_time
 
-        # Enhanced memory metrics
         memory_metrics = {
             "memory_usage_kb": result.get("memory_usage_kb", 0),
             "min_memory_kb": result.get("min_memory_kb", 0),
