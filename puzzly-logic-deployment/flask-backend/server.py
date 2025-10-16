@@ -15,9 +15,16 @@ from solver.analysis.visualizer import ComplexityVisualizer
 
 app = Flask(__name__)
 
-frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-CORS(app, origins=[frontend_url, "https://puzzlylogic.netlify.app"])
+# Configure CORS for production - allow both Netlify and local development
+allowed_origins = [
+    "https://puzzlylogic.netlify.app",  # Your Netlify domain
+    "http://localhost:5173",            # Local development
+    "http://127.0.0.1:5173"            # Alternative local development
+]
 
+CORS(app, origins=allowed_origins, supports_credentials=True)
+
+# Configure logging for production
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
@@ -30,7 +37,7 @@ complexity_trackers = {}
 def _build_cors_preflight_response():
     """Build CORS preflight response"""
     response = jsonify({"message": "Preflight Request Accepted"})
-    response.headers.add("Access-Control-Allow-Origin", frontend_url)
+    response.headers.add("Access-Control-Allow-Origin", "https://puzzlylogic.netlify.app")
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
     response.headers.add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
     response.headers.add("Access-Control-Allow-Credentials", "true")
@@ -38,7 +45,7 @@ def _build_cors_preflight_response():
 
 def _corsify_actual_response(response):
     """Add CORS headers to actual response"""
-    response.headers.add("Access-Control-Allow-Origin", frontend_url)
+    response.headers.add("Access-Control-Allow-Origin", "https://puzzlylogic.netlify.app")
     response.headers.add("Access-Control-Allow-Credentials", "true")
     return response
 
@@ -48,7 +55,8 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "Crossword Puzzle API",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "allowed_origins": allowed_origins 
     })
 
 @app.route("/", methods=["GET"])
