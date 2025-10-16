@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 # Configure CORS for production - replace with your actual Netlify domain
 frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-CORS(app, origins=[frontend_url, "https://your-app-name.netlify.app"])
+CORS(app, origins=[frontend_url, "https://puzzlylogic.netlify.app"])
 
 # Configure logging for production
 logging.basicConfig(
